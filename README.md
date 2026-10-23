@@ -19,6 +19,58 @@ Traditional campus operations suffer from four critical breakdown points:
 
 ---
 
+## Monorepo Architecture
+
+CampusConnect is structured as a full-stack monorepo with separated **Frontend** and **Backend** directories:
+
+```
+Zenith/
+├── frontend/               # Next.js 16 Client Portal (React 19, Three.js 3D Living Campus, Biometrics)
+│   ├── src/
+│   │   ├── app/            # App Router pages, layout, and editorial views
+│   │   ├── components/     # LivingCampus 3D model, FaceRecognitionModal, TopBar
+│   │   ├── context/        # Client AuthContext & session state
+│   │   └── lib/            # Client types, constants, and utilities
+│   ├── public/             # Paper dot-grid background, branding, and assets
+│   ├── package.json
+│   └── tsconfig.json
+│
+├── backend/                # Node.js & Express TypeScript API Server (Port 5000)
+│   ├── src/
+│   │   ├── controllers/    # Express route handlers (AI, Auth, Tickets)
+│   │   ├── routes/         # REST API endpoints (/api/ai, /api/auth, /api/tickets)
+│   │   ├── services/       # Google Gemini SDK, Complaint Analysis, Campus Brain, Auth
+│   │   ├── models/         # Domain TypeScript types & Zod schemas
+│   │   ├── data/           # In-memory operations database & seed records
+│   │   └── server.ts       # Express application entry point with CORS & JSON body parser
+│   ├── supabase/           # PostgreSQL migration schemas
+│   ├── package.json
+│   └── tsconfig.json
+│
+├── tests/                  # Automated domain test suite
+├── package.json            # Root workspace orchestrator (runs frontend & backend concurrently)
+└── README.md
+```
+
+### Quick Start
+
+```bash
+# 1. Install all workspace dependencies
+npm install
+
+# 2. Run both Frontend and Backend concurrently
+npm run dev
+
+# Or run individually:
+npm run dev:frontend   # Launches Next.js on http://localhost:3000
+npm run dev:backend    # Launches Express API on http://localhost:5000
+
+# Run automated domain tests
+npm test
+```
+
+---
+
 ## 2. Platform Architecture & Features
 
 ### 🏛️ The Living Campus (Three.js WebGL Digital Twin)
