@@ -11,9 +11,11 @@
     "dev": "concurrently -n \"frontend,backend\" -c \"cyan,magenta\" \"npm run dev --prefix frontend\" \"npm run dev --prefix backend\"",
     "dev:frontend": "npm run dev --prefix frontend",
     "dev:backend": "npm run dev --prefix backend",
-    "build": "npm run build --prefix frontend && npm run build --prefix backend",
-    "build:frontend": "npm run build --prefix frontend",
+    "build": "npm run build --prefix frontend && cp -r frontend/.next .next && (cp -r frontend/public ./public 2>/dev/null || true)",
+    "build:all": "npm run build --prefix frontend && npm run build --prefix backend",
+    "build:frontend": "npm run build --prefix frontend && cp -r frontend/.next .next && (cp -r frontend/public ./public 2>/dev/null || true)",
     "build:backend": "npm run build --prefix backend",
+    "start": "npm run start --prefix frontend",
     "start:frontend": "npm run start --prefix frontend",
     "start:backend": "npm run start --prefix backend",
     "test": "node --test tests/domain.test.mjs"
