@@ -22,8 +22,13 @@ import {
   Building2, 
   User, 
   AlertTriangle,
-  CheckCircle2
+  CheckCircle2,
+  Network,
+  ShieldAlert
 } from 'lucide-react';
+import RepairCopilotPanel from '@/components/copilot/RepairCopilotPanel';
+import { addKnowledgeEntry } from '@/lib/data/knowledge-base';
+import { getIncidents } from '@/lib/services/outage-detective';
 
 export default function StaffTicketDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = use(params);
@@ -43,6 +48,9 @@ export default function StaffTicketDetailPage({ params }: { params: Promise<{ id
   // Proof-of-Fix Resolution Evidence Upload & AI Verification
   const [resolutionPhotoBase64, setResolutionPhotoBase64] = useState<string | null>(null);
   const [technicianNotes, setTechnicianNotes] = useState('Replaced damaged gasket with new valve fitting. Flushed line and confirmed zero drips under pressure.');
+  const [partsUsedInput, setPartsUsedInput] = useState('');
+  const [timeSpentInput, setTimeSpentInput] = useState('35');
+  const [toolsNeededInput, setToolsNeededInput] = useState('');
   const [isEvaluatingEvidence, setIsEvaluatingEvidence] = useState(false);
 
   const loadData = () => {
@@ -127,9 +135,26 @@ export default function StaffTicketDetailPage({ params }: { params: Promise<{ id
         assessment,
       });
 
+      // Index resolution into Knowledge Base for Repair Copilot
+      addKnowledgeEntry({
+        ticketId: ticket.id,
+        ticketNumber: ticket.ticketNumber,
+        category: ticket.category,
+        title: ticket.title,
+        issueSummary: ticket.aiSummary || ticket.title,
+        locationType: ticket.room ? 'Room / Lab' : 'Corridor',
+        fixtureType: ticket.category,
+        resolutionNotes: technicianNotes,
+        partsUsed: partsUsedInput.split(',').map(p => p.trim()).filter(Boolean),
+        timeSpentMinutes: parseInt(timeSpentInput, 10) || 35,
+        toolsNeeded: toolsNeededInput.split(',').map(t => t.trim()).filter(Boolean),
+        studentConfirmedFix: true,
+        isReliable: true,
+      });
+
       setResolutionPhotoBase64(null);
       loadData();
-      alert('Proof-of-Fix uploaded and evaluated! Ticket moved to RESOLVED awaiting student sign-off.');
+      alert('Proof-of-Fix verified and indexed in Repair Copilot knowledge base! Ticket moved to RESOLVED.');
     } catch (e) {
       console.error('Resolution evaluation error', e);
     } finally {
@@ -171,6 +196,45 @@ export default function StaffTicketDetailPage({ params }: { params: Promise<{ id
         <div className="lg:col-span-8 space-y-6">
           {/* Main Incident Details */}
           <div className="bg-[#FCFAF6] rounded-xl border border-[#E7E1D7] p-6 space-y-4">
+            {/* Outage Detective Probable Incident Link */}
+            {(() => {
+              const matchingInc = getIncidents().find(i => i.memberTicketIds.includes(ticket.id) || ticket.relatedIncidentId === i.id);
+              if (!matchingInc) return null;
+              return (
+                <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-300 text-xs text-amber-950 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-xs">
+                  <div className="flex items-center gap-2.5">
+                    <Network className="w-4 h-4 text-amber-700 shrink-0" />
+                    <div>
+                      <span className="font-bold">Part of Probable Incident: </span>
+                      <span>{matchingInc.incidentNumber} • {matchingInc.sharedNodeName}</span>
+                    </div>
+                  </div>
+                  <Link
+                    href={`/staff/incidents/${matchingInc.id}`}
+                    className="self-start sm:self-auto px-2.5 py-1 rounded bg-amber-200/90 hover:bg-amber-300 font-mono text-[11px] font-bold text-amber-900 transition-colors"
+                  >
+                    View Incident Topology →
+                  </Link>
+                </div>
+              );
+            })()}
+
+            {/* Immediate Safety Hazard Banner */}
+            {ticket.isSafetyHazard && (
+              <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-300 text-xs text-rose-950 flex items-start gap-2.5">
+                <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                <div className="space-y-0.5">
+                  <div className="font-bold flex items-center gap-1.5">
+                    <span>Immediate Safety Hazard Flagged</span>
+                    <span className="px-1.5 py-0.2 rounded bg-rose-600 text-white font-mono text-[10px]">STAFF CONFIRMATION REQUIRED</span>
+                  </div>
+                  <p className="text-[11px] text-rose-800">
+                    {ticket.safetyEscalationReason || 'Multimodal inspection detected hazardous arcing or water proximity.'}
+                  </p>
+                </div>
+              </div>
+            )}
+
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-mono text-xs font-bold text-[#35483A]">
                 {ticket.ticketNumber}
@@ -285,6 +349,46 @@ export default function StaffTicketDetailPage({ params }: { params: Promise<{ id
                   />
                 </div>
 
+                {/* Structured Knowledge Base Capture */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3.5 rounded-xl bg-ivory/70 border border-border-subtle">
+                  <div>
+                    <label className="block text-[10px] font-mono uppercase text-muted-ink mb-1 font-semibold">
+                      Parts Used (comma separated)
+                    </label>
+                    <input
+                      type="text"
+                      value={partsUsedInput}
+                      onChange={(e) => setPartsUsedInput(e.target.value)}
+                      placeholder="e.g. 40mm EPDM gasket, Teflon tape"
+                      className="w-full text-xs p-2 rounded-lg border border-border-subtle bg-paper text-ink"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-mono uppercase text-muted-ink mb-1 font-semibold">
+                      Time Spent (minutes)
+                    </label>
+                    <input
+                      type="number"
+                      value={timeSpentInput}
+                      onChange={(e) => setTimeSpentInput(e.target.value)}
+                      placeholder="35"
+                      className="w-full text-xs p-2 rounded-lg border border-border-subtle bg-paper text-ink"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-mono uppercase text-muted-ink mb-1 font-semibold">
+                      Tools Required
+                    </label>
+                    <input
+                      type="text"
+                      value={toolsNeededInput}
+                      onChange={(e) => setToolsNeededInput(e.target.value)}
+                      placeholder="e.g. Wrench, Multimeter"
+                      className="w-full text-xs p-2 rounded-lg border border-border-subtle bg-paper text-ink"
+                    />
+                  </div>
+                </div>
+
                 <button
                   type="button"
                   onClick={handleSubmitProofOfFix}
@@ -292,7 +396,7 @@ export default function StaffTicketDetailPage({ params }: { params: Promise<{ id
                   className="btn-primary"
                 >
                   <Sparkles className="w-3.5 h-3.5 mr-1" />
-                  <span>{isEvaluatingEvidence ? 'Evaluating Evidence with Gemini...' : 'Verify Proof-of-Fix & Move to Resolved'}</span>
+                  <span>{isEvaluatingEvidence ? 'Evaluating Evidence with Gemini...' : 'Verify Proof-of-Fix & Index in Copilot'}</span>
                 </button>
               </div>
             )}
@@ -326,8 +430,11 @@ export default function StaffTicketDetailPage({ params }: { params: Promise<{ id
           </div>
         </div>
 
-        {/* SECONDARY SIDEBAR (4 cols): Technician assignment, status override, note logger */}
-        <div className="lg:col-span-4 space-y-4">
+        {/* SECONDARY SIDEBAR (4 cols): Repair Copilot, Technician assignment, status override, note logger */}
+        <div className="lg:col-span-4 space-y-6">
+          {/* REPAIR COPILOT: PREPARE FOR THIS JOB */}
+          <RepairCopilotPanel ticket={ticket} />
+
           {/* Assignment */}
           <div className="bg-[#FCFAF6] rounded-xl border border-[#E7E1D7] p-5 space-y-3">
             <div className="font-mono text-xs font-bold uppercase tracking-wider text-[#35483A] pb-2 border-b border-[#E7E1D7]">

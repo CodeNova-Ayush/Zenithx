@@ -27,6 +27,10 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import FaceRecognitionModal from '@/components/auth/FaceRecognitionModal';
+import ShowMeRecorder from '@/components/report/ShowMeRecorder';
+import { analyzeShowMeRecording } from '@/lib/ai/show-me-analysis';
+import { MediaAnalysisResult } from '@/lib/types';
+import { Video, ShieldAlert } from 'lucide-react';
 
 export default function StudentReportPage() {
   const router = useRouter();
@@ -54,6 +58,14 @@ export default function StudentReportPage() {
   const [photoBase64, setPhotoBase64] = useState<string | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
 
+  // Student Identification & Contact Details State
+  const [studentName, setStudentName] = useState(user?.name && user.name !== 'Ananya Sharma' ? user.name : '');
+  const [studentRollNo, setStudentRollNo] = useState('');
+  const [studentPhone, setStudentPhone] = useState('');
+  const [studentEmail, setStudentEmail] = useState(user?.email && user.email !== 'ananya@campus.edu' ? user.email : '');
+  const [studentDepartment, setStudentDepartment] = useState('Computer Science & Engineering');
+  const [formValidationMessage, setFormValidationMessage] = useState<string | null>(null);
+
   // Voice recording state
   const [isRecording, setIsRecording] = useState(false);
 
@@ -63,12 +75,87 @@ export default function StudentReportPage() {
   const [isDemoAi, setIsDemoAi] = useState(false);
   const [clarificationResponse, setClarificationResponse] = useState('');
 
+  // Show-Me Video & Voice Reporting Mode
+  const [reportMode, setReportMode] = useState<'text' | 'showme'>('text');
+  const [showMeAnalysis, setShowMeAnalysis] = useState<MediaAnalysisResult | null>(null);
+  const [isAnalyzingShowMe, setIsAnalyzingShowMe] = useState(false);
+  const [showMeMedia, setShowMeMedia] = useState<{ blob: Blob; mediaType: 'video' | 'audio'; dataUrl: string } | null>(null);
+  const [isFollowUpRecording, setIsFollowUpRecording] = useState(false);
+
   // Editable fields in review step
   const [finalCategory, setFinalCategory] = useState<Category>('plumbing');
   const [finalPriority, setFinalPriority] = useState<Priority>('normal');
   const [finalTitle, setFinalTitle] = useState('');
   const [createdTicketId, setCreatedTicketId] = useState<string | null>(null);
   const [createdTicketNumber, setCreatedTicketNumber] = useState<string | null>(null);
+
+  // Show-Me Recording Handler
+  const handleShowMeComplete = async (blob: Blob, mediaType: 'video' | 'audio', dataUrl: string) => {
+    setShowMeMedia({ blob, mediaType, dataUrl });
+    setIsAnalyzingShowMe(true);
+
+    try {
+      const result = await analyzeShowMeRecording({ mediaDataUrl: dataUrl, mediaType });
+      setShowMeAnalysis(result);
+      setComplaintText(result.transcriptEnglish || result.transcriptOriginal);
+      setFinalCategory(result.suggestedCategory);
+      setFinalPriority(result.suggestedPriority);
+      setFinalTitle(result.transcriptEnglish ? result.transcriptEnglish.slice(0, 70) : 'Multimodal Reported Issue');
+
+      if (result.extractedLocation?.building) {
+        const matchedBldg = CAMPUS_BUILDINGS.find(b => b.building.toLowerCase().includes(result.extractedLocation.building!.toLowerCase()));
+        if (matchedBldg) setSelectedBuilding(matchedBldg.building);
+      }
+      if (result.extractedLocation?.floor) {
+        setSelectedFloor(result.extractedLocation.floor);
+      }
+      if (result.extractedLocation?.room) {
+        setSelectedRoom(result.extractedLocation.room);
+      }
+    } catch (err: any) {
+      console.error('Show-Me analysis failed:', err);
+      alert('Could not complete multimodal analysis. You can continue with text description.');
+    } finally {
+      setIsAnalyzingShowMe(false);
+    }
+  };
+
+  // Follow-up voice answer handler
+  const toggleFollowUpVoice = () => {
+    if (typeof window === 'undefined') return;
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      alert('Speech recognition is not supported in this browser. Please type your reply.');
+      return;
+    }
+
+    if (isFollowUpRecording) {
+      setIsFollowUpRecording(false);
+      return;
+    }
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.lang = 'en-IN';
+
+      recognition.onstart = () => setIsFollowUpRecording(true);
+      recognition.onresult = (event: any) => {
+        const transcript = Array.from(event.results)
+          .map((r: any) => r[0].transcript)
+          .join('');
+        setClarificationResponse(prev => prev ? `${prev} ${transcript}` : transcript);
+      };
+      recognition.onerror = () => setIsFollowUpRecording(false);
+      recognition.onend = () => setIsFollowUpRecording(false);
+      recognition.start();
+    } catch {
+      setIsFollowUpRecording(false);
+    }
+  };
+
 
   // Voice Recognition handler
   const toggleVoiceRecording = () => {
@@ -167,6 +254,86 @@ export default function StudentReportPage() {
     }
   };
 
+  // Validate all student identity and contact fields
+  const validateStudentDetails = (): boolean => {
+    if (!studentName.trim()) {
+      setFormValidationMessage('Please enter your Full Name.');
+      return false;
+    }
+    if (!studentRollNo.trim()) {
+      setFormValidationMessage('Please enter your Student Roll Number / Campus ID.');
+      return false;
+    }
+    if (!studentPhone.trim()) {
+      setFormValidationMessage('Please enter your Contact Mobile/WhatsApp phone number so technicians can reach you.');
+      return false;
+    }
+    if (!studentEmail.trim()) {
+      setFormValidationMessage('Please enter your official Campus Email address.');
+      return false;
+    }
+    if (!selectedRoom.trim()) {
+      setFormValidationMessage('Please specify the Room, Wing, or Landmark indicator.');
+      return false;
+    }
+    setFormValidationMessage(null);
+    return true;
+  };
+
+  // Direct Submission Handler (with full student details)
+  const handleDirectSubmission = () => {
+    if (!validateStudentDetails()) {
+      setStep(2);
+      return;
+    }
+
+    const studentUid = studentRollNo.trim() || user?.id || 'STUDENT-REG';
+    const studentDisplayName = studentName.trim() || user?.name || 'Campus Student';
+    const studentContactEmail = studentEmail.trim() || user?.email || 'student@campus.edu';
+
+    const ticket = createTicket({
+      title: finalTitle || aiAnalysis?.summary || 'Campus Maintenance Incident',
+      originalDescription: clarificationResponse
+        ? `${complaintText}\n\nClarification Provided:\n${clarificationResponse}\n\n[Student Identity Manifest]\n• Full Name: ${studentDisplayName}\n• Roll Number: ${studentRollNo.trim()}\n• Contact Phone: ${studentPhone.trim()}\n• Department: ${studentDepartment.trim()}\n• Location: ${selectedBuilding}, Floor ${selectedFloor}, ${selectedRoom.trim()}`
+        : `${complaintText}\n\n[Student Identity Manifest]\n• Full Name: ${studentDisplayName}\n• Roll Number: ${studentRollNo.trim()}\n• Contact Phone: ${studentPhone.trim()}\n• Department: ${studentDepartment.trim()}\n• Location: ${selectedBuilding}, Floor ${selectedFloor}, ${selectedRoom.trim()}`,
+      aiSummary: aiAnalysis?.summary || complaintText.slice(0, 80),
+      category: finalCategory,
+      building: selectedBuilding,
+      floor: selectedFloor,
+      room: selectedRoom,
+      priority: finalPriority,
+      studentId: studentUid,
+      studentName: studentDisplayName,
+      studentEmail: studentContactEmail,
+      studentPhone: studentPhone.trim(),
+      studentDepartment: studentDepartment.trim(),
+      imageUrl: photoPreview || undefined,
+      isSafetyHazard: showMeAnalysis?.isSafetyHazard,
+      safetyEscalationReason: showMeAnalysis?.isSafetyHazard ? showMeAnalysis.safetyConcerns.join(' • ') : undefined,
+      mediaRecord: showMeMedia ? {
+        id: `med-${Date.now()}`,
+        mediaType: showMeMedia.mediaType,
+        mediaUrl: showMeMedia.dataUrl,
+        durationSeconds: 15,
+        fileSizeBytes: showMeMedia.blob.size,
+        recordedAt: new Date().toISOString(),
+        analysis: showMeAnalysis || undefined,
+      } : undefined,
+    });
+
+    setCreatedTicketId(ticket.id);
+    setCreatedTicketNumber(ticket.ticketNumber);
+    setStep(5);
+
+    try {
+      confetti({
+        particleCount: 90,
+        spread: 70,
+        origin: { y: 0.6 }
+      });
+    } catch {}
+  };
+
   // Trigger submission: Launch Face Recognition modal to verify student identity first!
   const handleSubmitTicket = () => {
     setIsFaceModalOpen(true);
@@ -181,23 +348,31 @@ export default function StudentReportPage() {
     photoUrl?: string;
   }) => {
     setBiometricVerified(true);
+    const verifiedName = studentData.name || studentName || 'Campus Student';
+    const verifiedId = studentData.studentId || studentRollNo || 'STUDENT-BIO';
+    const verifiedDept = studentData.department || studentDepartment || 'Engineering';
+
+    if (studentData.name) setStudentName(studentData.name);
+    if (studentData.studentId) setStudentRollNo(studentData.studentId);
+    if (studentData.department) setStudentDepartment(studentData.department);
+
     setBiometricData({
-      studentName: studentData.name,
-      studentId: studentData.studentId,
-      department: studentData.department,
+      studentName: verifiedName,
+      studentId: verifiedId,
+      department: verifiedDept,
       faceImage: studentData.photoUrl,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     });
 
-    const studentUid = studentData.studentId || user?.id || 'STUDENT-BIO';
-    const studentDisplayName = studentData.name || user?.name || 'Campus Student';
-    const studentContactEmail = user?.email || `${studentData.studentId.toLowerCase().replace(/[^a-z0-9]/g, '')}@campus.edu`;
+    const studentUid = verifiedId;
+    const studentDisplayName = verifiedName;
+    const studentContactEmail = studentEmail.trim() || user?.email || `${verifiedId.toLowerCase().replace(/[^a-z0-9]/g, '')}@campus.edu`;
 
     const ticket = createTicket({
       title: finalTitle || aiAnalysis?.summary || 'Campus Maintenance Incident',
       originalDescription: clarificationResponse
-        ? `${complaintText}\n\nClarification Provided:\n${clarificationResponse}\n\n[Biometric Face ID Verified: ${studentDisplayName} (Student ID: ${studentData.studentId}) — Match: 99.4%]`
-        : `${complaintText}\n\n[Biometric Face ID Verified: ${studentDisplayName} (Student ID: ${studentData.studentId}) — Match: 99.4%]`,
+        ? `${complaintText}\n\nClarification Provided:\n${clarificationResponse}\n\n[Biometric Face ID Verified: ${studentDisplayName} (Roll ID: ${verifiedId}) — Match: 99.4% | Phone: ${studentPhone} | Dept: ${verifiedDept}]`
+        : `${complaintText}\n\n[Biometric Face ID Verified: ${studentDisplayName} (Roll ID: ${verifiedId}) — Match: 99.4% | Phone: ${studentPhone} | Dept: ${verifiedDept}]`,
       aiSummary: aiAnalysis?.summary || complaintText.slice(0, 80),
       category: finalCategory,
       building: selectedBuilding,
@@ -207,7 +382,20 @@ export default function StudentReportPage() {
       studentId: studentUid,
       studentName: studentDisplayName,
       studentEmail: studentContactEmail,
+      studentPhone: studentPhone.trim(),
+      studentDepartment: verifiedDept,
       imageUrl: studentData.photoUrl || photoPreview || undefined,
+      isSafetyHazard: showMeAnalysis?.isSafetyHazard,
+      safetyEscalationReason: showMeAnalysis?.isSafetyHazard ? showMeAnalysis.safetyConcerns.join(' • ') : undefined,
+      mediaRecord: showMeMedia ? {
+        id: `med-${Date.now()}`,
+        mediaType: showMeMedia.mediaType,
+        mediaUrl: showMeMedia.dataUrl,
+        durationSeconds: 15,
+        fileSizeBytes: showMeMedia.blob.size,
+        recordedAt: new Date().toISOString(),
+        analysis: showMeAnalysis || undefined,
+      } : undefined,
     });
 
     setCreatedTicketId(ticket.id);
@@ -323,171 +511,450 @@ export default function StudentReportPage() {
               Step 1: What is the defect or failure?
             </h2>
             <p className="text-sm text-[#57564E] mt-1">
-              Type or speak casually. E.g. &ldquo;Water leaking heavily under washroom sink&rdquo; or &ldquo;पंखा बहुत तेज आवाज कर रहा है&rdquo;.
+              Choose your reporting method: type with photos or record a short video/voice clip for Gemini AI interpretation.
             </p>
+
+            {/* Mode Switcher */}
+            <div className="flex items-center gap-2 mt-4">
+              <button
+                type="button"
+                onClick={() => setReportMode('text')}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-mono font-bold transition-all ${
+                  reportMode === 'text' 
+                    ? 'bg-[#35483A] text-white shadow-xs' 
+                    : 'bg-[#F8F4ED] text-[#77766E] hover:text-[#24251F] border border-[#E7E1D7]'
+                }`}
+              >
+                Type Details & Photos
+              </button>
+              <button
+                type="button"
+                onClick={() => setReportMode('showme')}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-mono font-bold flex items-center gap-1.5 transition-all ${
+                  reportMode === 'showme' 
+                    ? 'bg-[#35483A] text-white shadow-xs' 
+                    : 'bg-[#F8F4ED] text-[#77766E] hover:text-[#24251F] border border-[#E7E1D7]'
+                }`}
+              >
+                <Video className="w-3.5 h-3.5 text-amber-500" />
+                <span>Show Me (Video / Voice AI)</span>
+                <span className="text-[10px] font-mono px-1 rounded bg-amber-100 text-amber-900 border border-amber-300">
+                  NEW
+                </span>
+              </button>
+            </div>
           </div>
 
-          {/* Quick Pre-fill scenarios */}
-          <div className="flex flex-wrap items-center gap-1.5 text-xs">
-            <span className="font-mono text-[#77766E] mr-1">Pre-fills:</span>
-            <button
-              type="button"
-              onClick={() => setComplaintText('Continuous water leakage under sink in 2nd Floor Common Washroom. Water is pooling across floor.')}
-              className="px-2.5 py-1 rounded border border-[#E7E1D7] bg-[#F8F4ED] hover:bg-[#EDE4D7] text-[#24251F] transition-colors"
-            >
-              💧 Washroom leak
-            </button>
-            <button
-              type="button"
-              onClick={() => setComplaintText('Robotics Lab Room 204 AC unit sparked and breaker tripped east row workstations.')}
-              className="px-2.5 py-1 rounded border border-[#E7E1D7] bg-[#F8F4ED] hover:bg-[#EDE4D7] text-[#24251F] transition-colors"
-            >
-              ⚡ AC electrical spark
-            </button>
-            <button
-              type="button"
-              onClick={() => setComplaintText('Library 2nd floor study pod Wi-Fi keeps disconnecting every 5 minutes.')}
-              className="px-2.5 py-1 rounded border border-[#E7E1D7] bg-[#F8F4ED] hover:bg-[#EDE4D7] text-[#24251F] transition-colors"
-            >
-              📶 Wi-Fi drop
-            </button>
-          </div>
+          {/* SHOW-ME MULTIMODAL MODE */}
+          {reportMode === 'showme' ? (
+            <div className="space-y-6">
+              <ShowMeRecorder 
+                onRecordingComplete={handleShowMeComplete} 
+                maxDurationSeconds={15} 
+              />
 
-          {/* Text Area & Voice Input */}
-          <div className="relative">
-            <textarea
-              rows={4}
-              value={complaintText}
-              onChange={(e) => setComplaintText(e.target.value)}
-              placeholder="Describe the problem, symptoms, or safety hazards..."
-              className="w-full p-3.5 rounded-lg border border-[#E7E1D7] bg-[#F8F4ED] text-[#24251F] placeholder:text-[#77766E]/60 focus:outline-none focus:ring-1 focus:ring-[#35483A] text-sm resize-none"
-            />
-            <button
-              type="button"
-              onClick={toggleVoiceRecording}
-              className={`absolute bottom-3 right-3 px-2.5 py-1.5 rounded text-xs font-mono font-medium flex items-center gap-1.5 transition-colors ${
-                isRecording
-                  ? 'bg-rose-600 text-white animate-pulse'
-                  : 'bg-[#FCFAF6] border border-[#E7E1D7] text-[#35483A] hover:bg-[#EDE4D7]'
-              }`}
-            >
-              {isRecording ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5 text-[#35483A]" />}
-              <span>{isRecording ? 'Listening...' : 'Voice Dictate'}</span>
-            </button>
-          </div>
+              {isAnalyzingShowMe && (
+                <div className="p-6 rounded-2xl border border-border-subtle bg-ivory text-center space-y-3">
+                  <div className="w-8 h-8 border-2 border-forest border-t-transparent rounded-full animate-spin mx-auto" />
+                  <h4 className="font-serif text-sm font-bold text-ink">Analyzing Recording with Gemini Multimodal AI</h4>
+                  <p className="text-xs text-muted-ink max-w-sm mx-auto">
+                    Transcribing spoken Hindi/English, detecting audible rhythm anomalies, and indexing visible damage...
+                  </p>
+                </div>
+              )}
 
-          {/* Photo Attachment */}
-          <div>
-            <label className="block text-[11px] font-mono uppercase tracking-wider text-[#77766E] mb-2 font-semibold">
-              Photographic Evidence (Recommended for Proof-of-Fix)
-            </label>
-            <div className="flex items-center gap-4">
-              <label className="cursor-pointer inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-dashed border-[#D5CEBF] hover:border-[#35483A] bg-[#F8F4ED] text-xs font-medium text-[#24251F] transition-colors">
-                <Camera className="w-3.5 h-3.5 text-[#35483A]" />
-                <span>Select image or snap photo</span>
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handlePhotoUpload}
-                  className="hidden"
-                />
-              </label>
-              {photoPreview && (
-                <div className="relative">
-                  <img
-                    src={photoPreview}
-                    alt="Preview"
-                    className="w-14 h-14 rounded-lg object-cover border border-[#E7E1D7]"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => { setPhotoBase64(null); setPhotoPreview(null); }}
-                    className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-rose-600 text-white text-[10px] flex items-center justify-center"
-                  >
-                    <X className="w-2.5 h-2.5" />
-                  </button>
+              {showMeAnalysis && (
+                <div className="p-5 rounded-2xl border border-border-strong bg-ivory space-y-4 shadow-xs">
+                  {/* Immediate Safety Hazard Escalation Indicator */}
+                  {showMeAnalysis.isSafetyHazard && (
+                    <div className="p-4 rounded-xl bg-rose-50 border border-rose-300 text-xs text-rose-900 flex items-start gap-3">
+                      <ShieldAlert className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                      <div className="space-y-1">
+                        <div className="font-bold flex items-center gap-2">
+                          <span>Immediate Safety Hazard Detected</span>
+                          <span className="px-2 py-0.5 rounded bg-rose-600 text-white font-mono text-[10px]">URGENT PRIORITY</span>
+                        </div>
+                        <p className="text-[11px] text-rose-800 leading-relaxed">
+                          Gemini identified active arcing, sparks, or severe water accumulation. This report is automatically escalated for immediate staff dispatch upon your confirmation.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Transcripts */}
+                  <div className="space-y-2">
+                    <span className="text-[11px] font-mono uppercase tracking-wider text-muted-ink font-bold">
+                      Multimodal Speech Transcription ({showMeAnalysis.detectedLanguage})
+                    </span>
+                    <div className="p-3.5 rounded-xl bg-paper border border-border-subtle text-xs text-ink leading-relaxed font-mono">
+                      <p className="text-muted-ink italic">&ldquo;{showMeAnalysis.transcriptOriginal}&rdquo;</p>
+                      {showMeAnalysis.transcriptEnglish !== showMeAnalysis.transcriptOriginal && (
+                        <p className="mt-1 font-semibold text-ink">English: &ldquo;{showMeAnalysis.transcriptEnglish}&rdquo;</p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Observations Grid */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                    <div className="p-3.5 rounded-xl bg-paper border border-border-subtle space-y-1.5">
+                      <span className="font-mono text-[11px] uppercase font-bold text-forest">Visible Observations</span>
+                      <ul className="space-y-1 text-muted-ink text-[11px]">
+                        {showMeAnalysis.visualObservations.map((obs, i) => (
+                          <li key={i} className="flex items-start gap-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-forest mt-1 shrink-0" />
+                            <span>{obs}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+
+                    <div className="p-3.5 rounded-xl bg-paper border border-border-subtle space-y-1.5">
+                      <span className="font-mono text-[11px] uppercase font-bold text-forest">Audible Observations</span>
+                      <ul className="space-y-1 text-muted-ink text-[11px]">
+                        {showMeAnalysis.audioObservations.map((obs, i) => (
+                          <li key={i} className="flex items-start gap-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber mt-1 shrink-0" />
+                            <span>{obs}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+
+                  {/* Interactive Follow-Up Clarification Question */}
+                  <div className="p-4 rounded-xl border border-border-strong bg-paper space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-mono uppercase font-bold text-amber-700">
+                        Follow-Up Question from Gemini
+                      </span>
+                      <button
+                        type="button"
+                        onClick={toggleFollowUpVoice}
+                        className={`px-2 py-1 rounded text-[11px] font-mono flex items-center gap-1 transition-colors ${
+                          isFollowUpRecording ? 'bg-rose-600 text-white animate-pulse' : 'bg-ivory border border-border-subtle text-muted-ink hover:text-ink'
+                        }`}
+                      >
+                        <Mic className="w-3 h-3" />
+                        <span>{isFollowUpRecording ? 'Recording...' : 'Answer by Voice'}</span>
+                      </button>
+                    </div>
+
+                    <p className="text-xs font-semibold text-ink">
+                      {showMeAnalysis.followUpQuestion}
+                    </p>
+
+                    <input
+                      type="text"
+                      value={clarificationResponse}
+                      onChange={(e) => setClarificationResponse(e.target.value)}
+                      placeholder="Type or speak answer (e.g. 'Near entry door on bench 4')..."
+                      className="w-full text-xs p-2.5 rounded-lg border border-border-subtle bg-ivory text-ink focus:ring-1 focus:ring-forest"
+                    />
+                  </div>
+
+                  {/* Proceed from Show-Me */}
+                  <div className="flex justify-end pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setStep(2)}
+                      className="btn-primary"
+                    >
+                      <span>Proceed to Location Verification</span>
+                      <ArrowRight className="w-4 h-4 ml-1 btn-arrow" />
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
-          </div>
+          ) : (
+            <>
+              {/* Quick Pre-fill scenarios */}
+              <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                <span className="font-mono text-[#77766E] mr-1">Pre-fills:</span>
+                <button
+                  type="button"
+                  onClick={() => setComplaintText('Continuous water leakage under sink in 2nd Floor Common Washroom. Water is pooling across floor.')}
+                  className="px-2.5 py-1 rounded border border-[#E7E1D7] bg-[#F8F4ED] hover:bg-[#EDE4D7] text-[#24251F] transition-colors"
+                >
+                  💧 Washroom leak
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setComplaintText('Robotics Lab Room 204 AC unit sparked and breaker tripped east row workstations.')}
+                  className="px-2.5 py-1 rounded border border-[#E7E1D7] bg-[#F8F4ED] hover:bg-[#EDE4D7] text-[#24251F] transition-colors"
+                >
+                  ⚡ AC electrical spark
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setComplaintText('Library 2nd floor study pod Wi-Fi keeps disconnecting every 5 minutes.')}
+                  className="px-2.5 py-1 rounded border border-[#E7E1D7] bg-[#F8F4ED] hover:bg-[#EDE4D7] text-[#24251F] transition-colors"
+                >
+                  📶 Wi-Fi drop
+                </button>
+              </div>
 
-          <div className="flex justify-end pt-2 border-t border-[#E7E1D7]">
-            <button
-              type="button"
-              onClick={() => {
-                if (!complaintText.trim()) {
-                  alert('Please enter a description of the issue');
-                  return;
-                }
-                setStep(2);
-              }}
-              className="btn-primary"
-            >
-              <span>Next: Select Location</span>
-              <ArrowRight className="w-4 h-4 ml-1 btn-arrow" />
-            </button>
-          </div>
+              {/* Text Area & Voice Input */}
+              <div className="relative">
+                <textarea
+                  rows={4}
+                  value={complaintText}
+                  onChange={(e) => setComplaintText(e.target.value)}
+                  placeholder="Describe the problem, symptoms, or safety hazards..."
+                  className="w-full p-3.5 rounded-lg border border-[#E7E1D7] bg-[#F8F4ED] text-[#24251F] placeholder:text-[#77766E]/60 focus:outline-none focus:ring-1 focus:ring-[#35483A] text-sm resize-none"
+                />
+                <button
+                  type="button"
+                  onClick={toggleVoiceRecording}
+                  className={`absolute bottom-3 right-3 px-2.5 py-1.5 rounded text-xs font-mono font-medium flex items-center gap-1.5 transition-colors ${
+                    isRecording
+                      ? 'bg-rose-600 text-white animate-pulse'
+                      : 'bg-[#FCFAF6] border border-[#E7E1D7] text-[#35483A] hover:bg-[#EDE4D7]'
+                  }`}
+                >
+                  {isRecording ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5 text-[#35483A]" />}
+                  <span>{isRecording ? 'Listening...' : 'Voice Dictate'}</span>
+                </button>
+              </div>
+
+              {/* Photo Attachment */}
+              <div>
+                <label className="block text-[11px] font-mono uppercase tracking-wider text-[#77766E] mb-2 font-semibold">
+                  Photographic Evidence (Recommended for Proof-of-Fix)
+                </label>
+                <div className="flex items-center gap-4">
+                  <label className="cursor-pointer inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-dashed border-[#D5CEBF] hover:border-[#35483A] bg-[#F8F4ED] text-xs font-medium text-[#24251F] transition-colors">
+                    <Camera className="w-3.5 h-3.5 text-[#35483A]" />
+                    <span>Select image or snap photo</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handlePhotoUpload}
+                      className="hidden"
+                    />
+                  </label>
+                  {photoPreview && (
+                    <div className="relative">
+                      <img
+                        src={photoPreview}
+                        alt="Preview"
+                        className="w-14 h-14 rounded-lg object-cover border border-[#E7E1D7]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => { setPhotoBase64(null); setPhotoPreview(null); }}
+                        className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-rose-600 text-white text-[10px] flex items-center justify-center"
+                      >
+                        <X className="w-2.5 h-2.5" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex justify-end pt-2 border-t border-[#E7E1D7]">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!complaintText.trim()) {
+                      alert('Please enter a description of the issue');
+                      return;
+                    }
+                    setStep(2);
+                  }}
+                  className="btn-primary"
+                >
+                  <span>Next: Select Location</span>
+                  <ArrowRight className="w-4 h-4 ml-1 btn-arrow" />
+                </button>
+              </div>
+            </>
+          )}
         </div>
       )}
 
-      {/* STEP 2: Location Selection */}
+      {/* STEP 2: Location & Student Identification */}
       {step === 2 && (
         <div className="bg-[#FCFAF6] rounded-xl border border-[#E7E1D7] p-6 sm:p-8 space-y-6">
           <div className="border-b border-[#E7E1D7] pb-4">
-            <h2 className="text-base font-bold text-[#24251F]">
-              Step 2: Where is the fixture located?
-            </h2>
-            <p className="text-xs text-[#77766E] mt-0.5">
-              Assigned contractors use building and room coordinates for fast on-site navigation.
+            <div className="flex items-center gap-2">
+              <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-[#35483A] text-white">
+                STEP 2 OF 4
+              </span>
+              <h2 className="text-base sm:text-lg font-bold text-[#24251F]">
+                Incident Location & Student Identification
+              </h2>
+            </div>
+            <p className="text-xs text-[#57564E] mt-1">
+              Provide the exact campus location and your verified student details. Technicians need your contact details to reach you during physical repairs.
             </p>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-[11px] font-mono uppercase tracking-wider text-[#77766E] mb-1.5 font-semibold">
-                Facility / Building
-              </label>
-              <select
-                value={selectedBuilding}
-                onChange={(e) => setSelectedBuilding(e.target.value)}
-                className="w-full p-2.5 rounded-lg border border-[#E7E1D7] bg-[#F8F4ED] text-[#24251F] text-sm focus:outline-none focus:ring-1 focus:ring-[#35483A]"
-              >
-                {CAMPUS_BUILDINGS.map((b) => (
-                  <option key={b.id} value={b.building}>
-                    {b.building} ({b.buildingCode})
-                  </option>
-                ))}
-              </select>
+          {/* Validation Alert */}
+          {formValidationMessage && (
+            <div className="p-3.5 rounded-lg bg-rose-50 border border-rose-300 text-rose-900 text-xs font-semibold flex items-center gap-2 animate-in fade-in">
+              <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0" />
+              <span>{formValidationMessage}</span>
+            </div>
+          )}
+
+          {/* Section A: Physical Location */}
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 text-xs font-mono font-bold uppercase text-[#35483A] border-b border-[#E7E1D7] pb-1.5">
+              <Building2 className="w-3.5 h-3.5" />
+              <span>Part A: Campus Fixture Location</span>
             </div>
 
-            <div>
-              <label className="block text-[11px] font-mono uppercase tracking-wider text-[#77766E] mb-1.5 font-semibold">
-                Floor Level
-              </label>
-              <select
-                value={selectedFloor}
-                onChange={(e) => setSelectedFloor(e.target.value)}
-                className="w-full p-2.5 rounded-lg border border-[#E7E1D7] bg-[#F8F4ED] text-[#24251F] text-sm focus:outline-none focus:ring-1 focus:ring-[#35483A]"
-              >
-                {currentBuildingObj?.floors.map((f) => (
-                  <option key={f} value={f}>
-                    Floor {f}
-                  </option>
-                ))}
-              </select>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-[11px] font-mono uppercase tracking-wider text-[#77766E] mb-1.5 font-semibold">
+                  Facility / Building *
+                </label>
+                <select
+                  value={selectedBuilding}
+                  onChange={(e) => setSelectedBuilding(e.target.value)}
+                  className="w-full p-2.5 rounded-lg border border-[#E7E1D7] bg-[#F8F4ED] text-[#24251F] text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#35483A]"
+                >
+                  {CAMPUS_BUILDINGS.map((b) => (
+                    <option key={b.id} value={b.building}>
+                      {b.building} ({b.buildingCode})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-mono uppercase tracking-wider text-[#77766E] mb-1.5 font-semibold">
+                  Floor Level *
+                </label>
+                <select
+                  value={selectedFloor}
+                  onChange={(e) => setSelectedFloor(e.target.value)}
+                  className="w-full p-2.5 rounded-lg border border-[#E7E1D7] bg-[#F8F4ED] text-[#24251F] text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#35483A]"
+                >
+                  {currentBuildingObj?.floors.map((f) => (
+                    <option key={f} value={f}>
+                      Floor {f}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="block text-[11px] font-mono uppercase tracking-wider text-[#77766E] mb-1.5 font-semibold">
+                  Specific Room / Wing / Landmark Indicator *
+                </label>
+                <input
+                  type="text"
+                  value={selectedRoom}
+                  onChange={(e) => {
+                    setSelectedRoom(e.target.value);
+                    if (formValidationMessage) setFormValidationMessage(null);
+                  }}
+                  placeholder="E.g. Room 204, Common Washroom Wing A, or Study Pod 3"
+                  className="w-full p-2.5 rounded-lg border border-[#E7E1D7] bg-[#F8F4ED] text-[#24251F] text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#35483A]"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Section B: Student Credentials & Contact */}
+          <div className="space-y-4 pt-2">
+            <div className="flex items-center justify-between border-b border-[#E7E1D7] pb-1.5">
+              <div className="flex items-center gap-2 text-xs font-mono font-bold uppercase text-[#35483A]">
+                <UserCheck className="w-3.5 h-3.5" />
+                <span>Part B: Student Contact & Identity (Required)</span>
+              </div>
+              {biometricVerified && (
+                <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800">
+                  Biometric Face ID Attached
+                </span>
+              )}
             </div>
 
-            <div className="sm:col-span-2">
-              <label className="block text-[11px] font-mono uppercase tracking-wider text-[#77766E] mb-1.5 font-semibold">
-                Room or Landmark Indicator
-              </label>
-              <input
-                type="text"
-                value={selectedRoom}
-                onChange={(e) => setSelectedRoom(e.target.value)}
-                placeholder="E.g. Room 204, Common Washroom Wing A, or Study Pod 3"
-                className="w-full p-2.5 rounded-lg border border-[#E7E1D7] bg-[#F8F4ED] text-[#24251F] text-sm focus:outline-none focus:ring-1 focus:ring-[#35483A]"
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-[11px] font-mono uppercase tracking-wider text-[#77766E] mb-1.5 font-semibold">
+                  Student Full Name *
+                </label>
+                <input
+                  type="text"
+                  value={studentName}
+                  onChange={(e) => {
+                    setStudentName(e.target.value);
+                    if (formValidationMessage) setFormValidationMessage(null);
+                  }}
+                  placeholder="E.g. Ananya Sharma or Rahul Verma"
+                  className="w-full p-2.5 rounded-lg border border-[#E7E1D7] bg-[#F8F4ED] text-[#24251F] text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#35483A]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-mono uppercase tracking-wider text-[#77766E] mb-1.5 font-semibold">
+                  Roll Number / Student Campus ID *
+                </label>
+                <input
+                  type="text"
+                  value={studentRollNo}
+                  onChange={(e) => {
+                    setStudentRollNo(e.target.value);
+                    if (formValidationMessage) setFormValidationMessage(null);
+                  }}
+                  placeholder="E.g. 2024CSB1042 or STU-8821"
+                  className="w-full p-2.5 rounded-lg border border-[#E7E1D7] bg-[#F8F4ED] text-[#24251F] text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#35483A]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-mono uppercase tracking-wider text-[#77766E] mb-1.5 font-semibold">
+                  Contact Phone / WhatsApp Mobile *
+                </label>
+                <input
+                  type="tel"
+                  value={studentPhone}
+                  onChange={(e) => {
+                    setStudentPhone(e.target.value);
+                    if (formValidationMessage) setFormValidationMessage(null);
+                  }}
+                  placeholder="E.g. +91 98765 43210"
+                  className="w-full p-2.5 rounded-lg border border-[#E7E1D7] bg-[#F8F4ED] text-[#24251F] text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#35483A]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-mono uppercase tracking-wider text-[#77766E] mb-1.5 font-semibold">
+                  Official Campus Email *
+                </label>
+                <input
+                  type="email"
+                  value={studentEmail}
+                  onChange={(e) => {
+                    setStudentEmail(e.target.value);
+                    if (formValidationMessage) setFormValidationMessage(null);
+                  }}
+                  placeholder="E.g. ananya@campus.edu"
+                  className="w-full p-2.5 rounded-lg border border-[#E7E1D7] bg-[#F8F4ED] text-[#24251F] text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#35483A]"
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="block text-[11px] font-mono uppercase tracking-wider text-[#77766E] mb-1.5 font-semibold">
+                  Academic Department / Branch *
+                </label>
+                <select
+                  value={studentDepartment}
+                  onChange={(e) => setStudentDepartment(e.target.value)}
+                  className="w-full p-2.5 rounded-lg border border-[#E7E1D7] bg-[#F8F4ED] text-[#24251F] text-xs sm:text-sm focus:outline-none focus:ring-1 focus:ring-[#35483A]"
+                >
+                  <option value="Computer Science & Engineering">Computer Science & Engineering</option>
+                  <option value="Electrical & Electronics Engineering">Electrical & Electronics Engineering</option>
+                  <option value="Mechanical Engineering">Mechanical Engineering</option>
+                  <option value="Civil & Infrastructure Engineering">Civil & Infrastructure Engineering</option>
+                  <option value="Chemical Engineering">Chemical Engineering</option>
+                  <option value="Biotechnology & Biosciences">Biotechnology & Biosciences</option>
+                  <option value="Management & Humanities">Management & Humanities</option>
+                </select>
+              </div>
             </div>
           </div>
 
@@ -502,7 +969,10 @@ export default function StudentReportPage() {
             </button>
             <button
               type="button"
-              onClick={triggerAiAnalysis}
+              onClick={() => {
+                if (!validateStudentDetails()) return;
+                triggerAiAnalysis();
+              }}
               className="btn-primary"
             >
               <Sparkles className="w-4 h-4 mr-1" />
@@ -668,39 +1138,82 @@ export default function StudentReportPage() {
               </div>
             </div>
 
-            <div className="p-3.5 rounded-lg bg-[#F8F4ED] border border-[#E7E1D7] text-xs space-y-1.5 font-mono">
-              <div className="flex justify-between text-[#77766E]">
-                <span>Location:</span>
-                <span className="text-[#24251F] font-bold">{selectedBuilding}, Floor {selectedFloor}, {selectedRoom}</span>
+            {/* Student & Dispatch Manifest Card */}
+            <div className="p-4 rounded-xl bg-[#F8F4ED] border border-[#E7E1D7] text-xs space-y-3 font-mono">
+              <div className="flex items-center justify-between pb-2 border-b border-[#E7E1D7]">
+                <span className="text-[11px] uppercase font-bold text-[#35483A] flex items-center gap-1.5">
+                  <UserCheck className="w-3.5 h-3.5" />
+                  <span>Student Credentials & Dispatch Manifest</span>
+                </span>
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-[#E7EBDD] text-[#35483A]">
+                  {biometricVerified ? 'BIOMETRIC VERIFIED (99.4%) ✓' : 'VERIFIED STUDENT DETAILS'}
+                </span>
               </div>
-              <div className="flex justify-between text-[#77766E]">
-                <span>Department:</span>
-                <span className="text-[#35483A] font-bold">{aiAnalysis?.department || 'Plumbing & Hydraulic Services'}</span>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-[#24251F]">
+                <div>
+                  <span className="text-[#77766E] text-[10px] block">Student Name:</span>
+                  <span className="font-bold text-xs">{studentName || user?.name || 'Campus Student'}</span>
+                </div>
+                <div>
+                  <span className="text-[#77766E] text-[10px] block">Roll Number / Student ID:</span>
+                  <span className="font-bold text-xs">{studentRollNo || 'STU-PENDING'}</span>
+                </div>
+                <div>
+                  <span className="text-[#77766E] text-[10px] block">Contact Mobile / Phone:</span>
+                  <span className="font-bold text-xs">{studentPhone || 'Not provided'}</span>
+                </div>
+                <div>
+                  <span className="text-[#77766E] text-[10px] block">Official Campus Email:</span>
+                  <span className="font-bold text-xs">{studentEmail || 'student@campus.edu'}</span>
+                </div>
+                <div>
+                  <span className="text-[#77766E] text-[10px] block">Academic Branch / Dept:</span>
+                  <span className="font-bold text-xs">{studentDepartment}</span>
+                </div>
+                <div>
+                  <span className="text-[#77766E] text-[10px] block">Assigned Fixture Location:</span>
+                  <span className="font-bold text-xs">{selectedBuilding}, Floor {selectedFloor}, {selectedRoom}</span>
+                </div>
               </div>
-              <div className="flex justify-between text-[#77766E]">
-                <span>Reported by:</span>
-                <span className="text-[#24251F]">{user?.name} ({user?.email})</span>
+
+              <div className="pt-2 border-t border-[#E7E1D7] flex justify-between text-[#77766E]">
+                <span>Routing To Department:</span>
+                <span className="text-[#35483A] font-bold">{aiAnalysis?.department || 'Campus Operations'}</span>
               </div>
             </div>
           </div>
 
-          <div className="flex items-center justify-between pt-4 border-t border-[#E7E1D7]">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-[#E7E1D7]">
             <button
               type="button"
               onClick={() => setStep(3)}
-              className="btn-secondary"
+              className="btn-secondary w-full sm:w-auto"
             >
               <ArrowLeft className="w-3.5 h-3.5 mr-1" />
               <span>Back</span>
             </button>
-            <button
-              type="button"
-              onClick={handleSubmitTicket}
-              className="btn-primary flex items-center gap-2"
-            >
-              <ScanFace className="w-4 h-4" />
-              <span>Verify Face & Register Complaint</span>
-            </button>
+
+            <div className="flex flex-col sm:flex-row items-center gap-2.5 w-full sm:w-auto">
+              <button
+                type="button"
+                onClick={handleSubmitTicket}
+                className="px-3.5 py-2.5 rounded-lg border border-[#D5CEBF] bg-[#EDE4D7] hover:bg-[#E2D8C9] text-xs font-mono font-bold text-[#35483A] transition-colors flex items-center justify-center gap-1.5 w-full sm:w-auto cursor-pointer"
+                title="Verify face with biometric camera"
+              >
+                <ScanFace className="w-4 h-4 text-[#35483A]" />
+                <span>{biometricVerified ? 'Re-scan Face ID' : 'Face ID Fast-Track'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleDirectSubmission}
+                className="btn-primary flex items-center justify-center gap-2 w-full sm:w-auto shadow-sm"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>Submit Official Complaint</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -730,16 +1243,24 @@ export default function StudentReportPage() {
               <span className="font-bold text-[#35483A]">OPEN (DISPATCHED)</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-[#77766E]">Student:</span>
-              <span className="text-[#24251F] font-bold">{biometricData?.studentName || user?.name || 'Registered Student'}</span>
+              <span className="text-[#77766E]">Student Name:</span>
+              <span className="text-[#24251F] font-bold">{studentName || biometricData?.studentName || user?.name || 'Registered Student'}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-[#77766E]">Student ID:</span>
-              <span className="text-[#24251F] font-bold">{biometricData?.studentId || user?.id || 'CC-ID-VERIFIED'}</span>
+              <span className="text-[#77766E]">Roll / ID Number:</span>
+              <span className="text-[#24251F] font-bold">{studentRollNo || biometricData?.studentId || user?.id || 'CC-ID-VERIFIED'}</span>
             </div>
+            {studentPhone && (
+              <div className="flex justify-between">
+                <span className="text-[#77766E]">Contact Phone:</span>
+                <span className="text-[#24251F] font-bold">{studentPhone}</span>
+              </div>
+            )}
             <div className="flex justify-between">
-              <span className="text-[#77766E]">Biometric Stamp:</span>
-              <span className="text-emerald-700 font-bold">Face ID Verified (99.4%) ✓</span>
+              <span className="text-[#77766E]">Verification:</span>
+              <span className={biometricVerified ? "text-emerald-700 font-bold" : "text-[#35483A] font-bold"}>
+                {biometricVerified ? 'Face ID Biometric Verified (99.4%) ✓' : 'Verified Student Credentials ✓'}
+              </span>
             </div>
             <div className="flex justify-between">
               <span className="text-[#77766E]">Facility:</span>

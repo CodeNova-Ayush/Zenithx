@@ -82,7 +82,12 @@ export function createTicket(params: {
   studentId: string;
   studentName: string;
   studentEmail: string;
+  studentPhone?: string;
+  studentDepartment?: string;
   imageUrl?: string;
+  isSafetyHazard?: boolean;
+  safetyEscalationReason?: string;
+  mediaRecord?: any;
 }): Ticket {
   const tickets = getTickets();
   const nextNum = 1050 + tickets.length;
@@ -90,7 +95,7 @@ export function createTicket(params: {
   const now = new Date().toISOString();
   
   const category = params.category;
-  const priority = params.priority;
+  const priority = params.isSafetyHazard ? 'urgent' : params.priority;
   const slaTarget = SLA_HOURS_MATRIX[category]?.[priority] || 24;
   const deadline = new Date(Date.now() + slaTarget * 3600 * 1000).toISOString();
   const department = params.department || DEPARTMENT_MAPPINGS[category] || 'Campus Operations';
@@ -119,7 +124,7 @@ export function createTicket(params: {
       actorName: params.studentName,
       actorRole: 'student',
       eventType: 'created',
-      message: 'Complaint submitted by student with details and location.',
+      message: `Complaint submitted by student (${params.studentName}, ID: ${params.studentId}${params.studentPhone ? `, Contact: ${params.studentPhone}` : ''}).`,
       isInternal: false,
       createdAt: now,
     },
@@ -136,12 +141,28 @@ export function createTicket(params: {
     }
   ];
 
+  if (params.isSafetyHazard) {
+    events.push({
+      id: `ev-${Date.now()}-3`,
+      ticketId,
+      actorId: 'system-ai',
+      actorName: 'Deterministic Safety Rule Engine',
+      actorRole: 'admin',
+      eventType: 'priority_changed',
+      message: `⚠️ Safety Hazard Flagged: ${params.safetyEscalationReason || 'Hazardous cues detected in recording'}. Priority escalated to Urgent.`,
+      isInternal: false,
+      createdAt: new Date(Date.now() + 800).toISOString(),
+    });
+  }
+
   const newTicket: Ticket = {
     id: ticketId,
     ticketNumber,
     studentId: params.studentId,
     studentName: params.studentName,
     studentEmail: params.studentEmail,
+    studentPhone: params.studentPhone,
+    studentDepartment: params.studentDepartment,
     title: params.title,
     originalDescription: params.originalDescription,
     aiSummary: params.aiSummary,
@@ -159,6 +180,9 @@ export function createTicket(params: {
     isOverdue: false,
     attachments,
     events,
+    isSafetyHazard: params.isSafetyHazard,
+    safetyEscalationReason: params.safetyEscalationReason,
+    mediaRecord: params.mediaRecord,
   };
 
   const updatedTickets = [newTicket, ...tickets];
@@ -172,9 +196,9 @@ export function createTicket(params: {
     recipientId: 'all_staff',
     ticketId: newTicket.id,
     ticketNumber: newTicket.ticketNumber,
-    title: `New ${priority.toUpperCase()} Ticket Filed`,
+    title: params.isSafetyHazard ? `🚨 URGENT SAFETY HAZARD: ${newTicket.ticketNumber}` : `New ${priority.toUpperCase()} Ticket Filed`,
     message: `${newTicket.ticketNumber}: ${newTicket.title} at ${newTicket.building}`,
-    type: 'ticket_created',
+    type: params.isSafetyHazard ? 'safety_alert' : 'ticket_created',
   });
 
   return newTicket;

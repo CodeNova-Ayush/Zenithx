@@ -1,6 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { useUser, useClerk } from '@clerk/nextjs';
 import { UserRole } from '@/lib/types';
 import { AuthUser } from '@/lib/auth/types';
 import { DEMO_PROFILES } from '@/lib/constants';
@@ -20,43 +21,48 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const { user: clerkUser, isLoaded: isClerkLoaded, isSignedIn } = useUser();
+  const clerk = useClerk();
+
   const [user, setUser] = useState<AuthUser | null>(null);
   const [role, setRole] = useState<UserRole>('student');
   const [isLoading, setIsLoading] = useState(true);
 
-  // Load session from server / cookie on mount
+  // Sync with Clerk when signed in
   useEffect(() => {
-    async function checkSession() {
-      try {
-        const res = await fetch('/api/auth/me');
-        const data = await res.json();
-        if (data.user) {
-          setUser(data.user);
-          setRole(data.user.role);
-        } else {
-          // Check saved demo role or fallback to default student demo
-          const savedRole = (localStorage.getItem('campusconnect_active_role') as UserRole) || 'student';
-          const demoProfile = DEMO_PROFILES[savedRole] || DEMO_PROFILES.student;
-          setUser({
-            id: demoProfile.id,
-            name: demoProfile.name,
-            email: demoProfile.email,
-            role: demoProfile.role,
-            department: demoProfile.department,
-            avatarUrl: demoProfile.avatarUrl,
-            createdAt: new Date().toISOString(),
-          });
-          setRole(demoProfile.role);
-        }
-      } catch (err) {
-        console.warn('Session check fallback', err);
-      } finally {
-        setIsLoading(false);
-      }
+    if (!isClerkLoaded) return;
+
+    if (isSignedIn && clerkUser) {
+      const clerkRole = (clerkUser.publicMetadata?.role as UserRole) || 'student';
+      const authenticatedUser: AuthUser = {
+        id: clerkUser.id,
+        name: clerkUser.fullName || clerkUser.firstName || 'Campus User',
+        email: clerkUser.primaryEmailAddress?.emailAddress || '',
+        role: clerkRole,
+        avatarUrl: clerkUser.imageUrl,
+        createdAt: clerkUser.createdAt ? new Date(clerkUser.createdAt).toISOString() : new Date().toISOString(),
+      };
+      setUser(authenticatedUser);
+      setRole(clerkRole);
+      setIsLoading(false);
+      return;
     }
 
-    checkSession();
-  }, []);
+    // Otherwise check saved demo role or fallback
+    const savedRole = (localStorage.getItem('campusconnect_active_role') as UserRole) || 'student';
+    const demoProfile = DEMO_PROFILES[savedRole] || DEMO_PROFILES.student;
+    setUser({
+      id: demoProfile.id,
+      name: demoProfile.name,
+      email: demoProfile.email,
+      role: demoProfile.role,
+      department: demoProfile.department,
+      avatarUrl: demoProfile.avatarUrl,
+      createdAt: new Date().toISOString(),
+    });
+    setRole(demoProfile.role);
+    setIsLoading(false);
+  }, [isClerkLoaded, isSignedIn, clerkUser]);
 
   const login = async (email: string, password: string) => {
     setIsLoading(true);
@@ -112,7 +118,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = async () => {
     try {
-      await fetch('/api/auth/logout', { method: 'POST' });
+      if (isSignedIn) {
+        await clerk.signOut();
+      } else {
+        await fetch('/api/auth/logout', { method: 'POST' });
+      }
     } catch {}
     setUser(null);
   };
@@ -145,7 +155,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         signup,
         logout,
         loginAsDemo,
-        isDemoMode: true,
+        isDemoMode: !isSignedIn,
       }}
     >
       {children}

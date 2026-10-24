@@ -102,31 +102,36 @@ export default function LandingPage() {
                 CampusConnect transforms unstructured student complaints into intelligent, trackable action—powered by real-time Three.js spatial twins, Gemini multimodal vision, and verified physical repairs.
               </p>
 
-              {/* Action Buttons */}
-              <div className="flex flex-wrap items-center gap-3 pt-2">
-                <Link
-                  href="/student/report"
-                  className="btn-primary px-6 py-3 text-sm sm:text-base font-semibold shadow-sm"
-                >
-                  <span>Report Campus Issue</span>
-                  <ArrowRight className="w-4 h-4 ml-1.5 btn-arrow" />
-                </Link>
+              {/* Action Buttons (Clean & Well-Fitted) */}
+              <div className="space-y-3 pt-2">
+                <div className="flex flex-wrap items-center gap-3">
+                  <Link
+                    href="/student/report"
+                    className="btn-primary px-5 py-2.5 text-sm font-semibold shadow-xs flex items-center gap-1.5 whitespace-nowrap"
+                  >
+                    <span>Report Campus Issue</span>
+                    <ArrowRight className="w-4 h-4 btn-arrow" />
+                  </Link>
 
-                <button
-                  type="button"
-                  onClick={() => setIsFaceModalOpen(true)}
-                  className="px-4 py-3 rounded-md bg-[#EDE4D7] hover:bg-[#E2D8C9] border border-[#D5CEBF] text-[#24251F] font-semibold text-sm sm:text-base transition-colors flex items-center gap-2 shadow-2xs cursor-pointer"
-                >
-                  <ScanFace className="w-4 h-4 text-[#35483A]" />
-                  <span>Face ID Clearance</span>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsFaceModalOpen(true)}
+                    className="px-4 py-2.5 rounded-lg bg-[#EDE4D7] hover:bg-[#E2D8C9] border border-[#D5CEBF] text-[#24251F] font-semibold text-sm transition-colors flex items-center gap-2 shadow-2xs whitespace-nowrap cursor-pointer"
+                  >
+                    <ScanFace className="w-4 h-4 text-[#35483A]" />
+                    <span>Face ID Clearance</span>
+                  </button>
+                </div>
 
-                <a
-                  href="#operations-matrix"
-                  className="btn-secondary px-5 py-3 text-sm sm:text-base"
-                >
-                  <span>Operations Matrix</span>
-                </a>
+                <div className="pt-1">
+                  <a
+                    href="#operations-matrix"
+                    className="inline-flex items-center gap-1.5 text-xs font-mono font-semibold text-[#57564E] hover:text-[#24251F] transition-colors group"
+                  >
+                    <span>Explore Operations Matrix & Architecture</span>
+                    <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+                  </a>
+                </div>
               </div>
 
               {/* Live Trust Metrics Strip */}

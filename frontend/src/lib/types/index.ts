@@ -90,6 +90,8 @@ export interface Ticket {
   studentId: string;
   studentName: string;
   studentEmail: string;
+  studentPhone?: string;
+  studentDepartment?: string;
   title: string;
   originalDescription: string;
   aiSummary: string;
@@ -117,6 +119,9 @@ export interface Ticket {
   studentFeedback?: string;
   relatedIncidentId?: string;
   isDuplicateOf?: string;
+  isSafetyHazard?: boolean;
+  safetyEscalationReason?: string;
+  mediaRecord?: TicketMediaRecord;
 }
 
 export interface DuplicateCandidate {
@@ -164,7 +169,272 @@ export interface NotificationItem {
   ticketNumber?: string;
   title: string;
   message: string;
-  type: 'ticket_created' | 'status_update' | 'assigned' | 'evidence_ready' | 'resolved' | 'reopened' | 'sla_alert';
+  type: 'ticket_created' | 'status_update' | 'assigned' | 'evidence_ready' | 'resolved' | 'reopened' | 'sla_alert' | 'incident_linked' | 'incident_resolved' | 'safety_alert';
   isRead: boolean;
   createdAt: string;
 }
+
+// ---------------------------------------------------------------------------
+// 1. OUTAGE DETECTIVE TYPES
+// ---------------------------------------------------------------------------
+export type InfrastructureNodeType = 
+  | 'water_source'
+  | 'riser'
+  | 'main_feeder'
+  | 'distribution_board'
+  | 'floor_circuit'
+  | 'network_core'
+  | 'building_switch'
+  | 'floor_ap'
+  | 'fixture_group'
+  | 'room';
+
+export interface InfrastructureNode {
+  id: string;
+  name: string;
+  type: InfrastructureNodeType;
+  category: Category;
+  parentIds: string[];
+  building: string;
+  floor?: number | string;
+  room?: string;
+  description?: string;
+  isActive: boolean;
+}
+
+export type IncidentStatus = 'proposed' | 'confirmed' | 'dismissed' | 'resolved';
+
+export interface IncidentConfidenceFactors {
+  ticketCount: number;
+  distinctRoomsCount: number;
+  distinctFloorsCount: number;
+  timeWindowMinutes: number;
+  confidenceScore: number; // 0 - 100
+  factors: string[];
+}
+
+export interface ProbableIncident {
+  id: string;
+  incidentNumber: string; // e.g. "INC-2026-001"
+  category: Category;
+  title: string;
+  sharedNodeId: string;
+  sharedNodeName: string;
+  sharedNodeType: InfrastructureNodeType;
+  building: string;
+  status: IncidentStatus;
+  confidence: IncidentConfidenceFactors;
+  memberTicketIds: string[];
+  aiExplanation?: string;
+  technicianWorkOrderDraft?: string;
+  studentNotice?: string;
+  workOrderAssignedTo?: string;
+  assignedStaffName?: string;
+  dismissalReason?: string;
+  createdAt: string;
+  updatedAt: string;
+  resolvedAt?: string;
+}
+
+// ---------------------------------------------------------------------------
+// 2. SHOW-ME REPORTING (VIDEO & VOICE) TYPES
+// ---------------------------------------------------------------------------
+export interface MediaAnalysisResult {
+  transcriptOriginal: string;
+  transcriptEnglish: string;
+  detectedLanguage: string;
+  visualObservations: string[];
+  audioObservations: string[];
+  suggestedCategory: Category;
+  suggestedDepartment: string;
+  extractedLocation: {
+    building?: string;
+    floor?: string;
+    room?: string;
+  };
+  missingInformation: string;
+  followUpQuestion: string;
+  suggestedPriority: Priority;
+  safetyConcerns: string[];
+  isSafetyHazard: boolean;
+  uncertaintyNotes: string;
+  confidenceScore: number;
+}
+
+export interface TicketMediaRecord {
+  id: string;
+  mediaType: 'video' | 'audio';
+  mediaUrl: string;
+  durationSeconds: number;
+  fileSizeBytes: number;
+  recordedAt: string;
+  analysis?: MediaAnalysisResult;
+}
+
+// ---------------------------------------------------------------------------
+// 3. REPAIR COPILOT TYPES
+// ---------------------------------------------------------------------------
+export interface KnowledgeBaseEntry {
+  id: string;
+  ticketId: string;
+  ticketNumber: string;
+  category: Category;
+  title: string;
+  issueSummary: string;
+  locationType: string;
+  fixtureType: string;
+  resolutionNotes: string;
+  partsUsed: string[];
+  timeSpentMinutes: number;
+  toolsNeeded: string[];
+  studentConfirmedFix: boolean;
+  isReliable: boolean;
+  helpfulVotes: number;
+  unhelpfulVotes: number;
+  embeddingVersion?: string;
+  createdAt: string;
+}
+
+export interface RepairCopilotGuidance {
+  similarCasesCount: number;
+  medianTimeMinutes: number;
+  mostCommonParts: { part: string; count: number }[];
+  suggestedTools: string[];
+  checklist: string[];
+  safetyPrecautions: string[];
+  estimatedTimeRange: string;
+  commonPitfalls: string[];
+  supportingTickets: {
+    ticketId: string;
+    ticketNumber: string;
+    resolutionNotes: string;
+    timeSpentMinutes: number;
+  }[];
+  aiConfidenceNote: string;
+  hasSufficientPrecedent: boolean;
+}
+
+export interface CopilotFeedback {
+  id: string;
+  ticketId: string;
+  technicianId: string;
+  helpful: boolean;
+  editedChecklist?: string[];
+  notes?: string;
+  createdAt: string;
+}
+
+// ---------------------------------------------------------------------------
+// 4. STUDENT VERIFIED ASSISTANT & KNOWLEDGE BASE TYPES
+// ---------------------------------------------------------------------------
+
+export type CampusKnowledgeCategory = 
+  | 'hostel_rules' 
+  | 'facilities' 
+  | 'services' 
+  | 'department_directory' 
+  | 'events' 
+  | 'faqs';
+
+export type KnowledgeAudience = 'all' | 'students' | 'hostel_residents' | 'staff';
+
+export interface CampusKnowledgeEntry {
+  id: string;
+  title: string;
+  slug: string;
+  category: CampusKnowledgeCategory;
+  summary: string;
+  content: string;
+  ownerDepartment: string;
+  contactEmail: string;
+  contactPhone: string;
+  officeLocation: string;
+  sourceLink?: string;
+  audience: KnowledgeAudience;
+  status: 'published' | 'draft' | 'archived';
+  effectiveFrom: string;
+  effectiveTo?: string | null;
+  lastReviewedAt: string; // ISO string
+  isStale?: boolean; // True if reviewed > 180 days ago
+  tags: string[];
+  helpfulCount: number;
+  unhelpfulCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface KnowledgeGap {
+  id: string;
+  normalizedTopic: string;
+  sampleQuestions: string[];
+  count: number;
+  unansweredCount: number;
+  thumbsDownCount: number;
+  suggestedDepartment: string;
+  status: 'open' | 'addressed' | 'dismissed';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AssistantSourceRef {
+  id: string;
+  title: string;
+  department: string;
+  link?: string;
+  lastReviewedAt: string;
+  isStale: boolean;
+  category: string;
+}
+
+export interface AssistantLiveLookupRef {
+  type: 'outage' | 'student_ticket' | 'event' | 'sla_metric' | 'emergency';
+  title: string;
+  referenceId?: string;
+  details?: string;
+}
+
+export interface AssistantNextStep {
+  label: string;
+  action: 'report_issue' | 'follow_outage' | 'contact_dept' | 'view_ticket' | 'link';
+  payload?: {
+    category?: Category;
+    title?: string;
+    description?: string;
+    building?: string;
+    floor?: number;
+    room?: string;
+    incidentId?: string;
+    ticketId?: string;
+    email?: string;
+    phone?: string;
+    url?: string;
+  };
+}
+
+export interface AssistantMessage {
+  id: string;
+  sender: 'user' | 'assistant' | 'system';
+  query: string;
+  answerText: string;
+  hindiTranslation?: string;
+  sources: AssistantSourceRef[];
+  liveLookupsUsed: AssistantLiveLookupRef[];
+  nextSteps: AssistantNextStep[];
+  isEmergency: boolean;
+  isUnverifiedFallback: boolean;
+  howAnswerWasMade: string;
+  feedback?: 'helpful' | 'unhelpful';
+  feedbackNotes?: string;
+  language: 'en' | 'hi';
+  createdAt: string;
+}
+
+export interface AssistantQueryContext {
+  studentId: string;
+  studentName?: string;
+  studentBuilding?: string;
+  studentFloor?: number;
+  studentRoom?: string;
+  preferredLanguage?: 'en' | 'hi';
+}
+

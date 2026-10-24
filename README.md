@@ -79,6 +79,39 @@ npm test
 - Dynamic pointer parallax, interactive raycasting on facilities, building inspector drawer, and camera reset controls.
 - Automatic fallback to high-contrast 2D sector view when WebGL is unavailable or reduced-motion is requested.
 
+### 🔎 Outage Detective (Root-Cause Inference from Complaint Clusters)
+- **Infrastructure Graph:** Models campus physical topologies (substations, distribution boards, water risers, routers, switches) in a directed graph.
+- **Deterministic Clustering:** Automatically triggers when $\ge 3$ complaints cluster within a 24-hour window across $\ge 2$ distinct rooms or floors.
+- **Lowest Common Ancestor (LCA):** Algorithmic traversal identifies the most specific upstream shared point of failure (e.g. Tagore Hostel Riser Valve A or Floor 2 Distribution Board).
+- **Transparent Confidence Scoring:** Calculates an audit score based on ticket volume, geographic dispersion, temporal concentration, and parent node specificity.
+- **Incident Lifecycle:** Controlled state machine (`proposed` $\to$ `confirmed` $\to$ `resolved` / `dismissed`).
+- **Staff Operations:** Dedicated Incidents Queue (`/staff/incidents`) and Interactive SVG Topology Drilldown (`/staff/incidents/[id]`).
+
+### 📹 Show-Me Reporting (Gemini Multimodal Video & Voice Complaints)
+- **In-Browser Capture:** Native video and voice recording (`ShowMeRecorder.tsx`) with a strict 15-second cap, real-time countdown, and Web Audio API live visualizer.
+- **Gemini 2.0 Multimodal Intelligence:** Extracts objective visual observations and audio cues without hallucinating unverified root causes.
+- **Bilingual Transcription:** Transcribes Hindi, Hinglish, and English audio with automatic English translation.
+- **Deterministic Hazard Escalation:** Detects high-risk safety cues (*sparking, exposed wires, bare wires, smoke, water near electric, flooding, gas leaks*) and automatically escalates ticket priority to **Urgent** with safety hazard alerts.
+- **Voice Q&A:** Synthesizes single-sentence follow-up questions to resolve missing context.
+- **Biometric Face Verification:** Confirms student identity via camera capture prior to ticket submission.
+
+### 🛠️ Repair Copilot (Technician Knowledge Retrieval)
+- **Campus Knowledge Base:** 28+ verified repair entries retrieved from historical resolved tickets across plumbing, electricity, internet, and cleanliness.
+- **Factual Aggregates:** Calculates deterministic median resolution times and top most-frequently used parts and tools.
+- **Gemini Preparation Guidance:** Synthesizes structured preparation checklists, required tools, and safety warnings citing specific past ticket numbers.
+- **Feedback Loop:** Technicians can upvote or downvote suggestions to continuously refine retrieval quality.
+- **Extended Resolution Capture:** Records specific parts used, tools utilized, and actual time spent upon ticket resolution to enrich the knowledge base.
+
+### 📚 Student Verified Campus Assistant & Admin Knowledge Base
+- **Zero-Hallucination Policy:** Answers synthesized exclusively around admin-managed knowledge entries and student-safe live operational lookups. Never speculates.
+- **Grounded Source Attribution:** Every claim references document title, owner department, and last-reviewed date. Amber warning banner displayed when a source is $> 6$ months old.
+- **Honest Fallback:** If no verified match exists, answers: *"I don’t have verified information on this topic"* and provides relevant department contact and a prefilled ticket creation action.
+- **Signature Wi-Fi Flow:** Correlates Wi-Fi inquiries with active hostel outages; offers instant "Follow this ticket" SMS/app subscriptions to suppress duplicate queues without inventing fix times.
+- **Emergency Safety Interception:** Life-safety terms (*fire, bleeding, unconscious, suicide, electric shock, assault*) immediately halt standard generation and display certified 24/7 campus emergency dispatch (`1800-CAMPUS-911` and Ambulance).
+- **Strict Student Privacy & Access Control:** Students can check only their own maintenance tickets (`studentId` validated); querying other students' tickets is refused.
+- **Admin Knowledge Governance (`/staff/knowledge`):** Complete admin portal to create, edit, publish, and archive entries, plus automated Knowledge Gap mining from student questions and negative feedback.
+- **Bilingual Support:** Native English and Hindi answering with verified source citations.
+
 ### 🧠 Gemini AI Multimodal Complaint Intake
 - Students describe problems naturally via text (English, Hindi, or Hinglish), Web Speech API voice dictation, or camera upload.
 - Gemini 2.5 Flash / 1.5 Flash extracts:
@@ -262,17 +295,17 @@ Follow this 5-minute judge demonstration script:
 
 ---
 
-## 8. Authentication & Security Architecture
+## 8. Authentication & Security Architecture (Clerk Integration)
 
-CampusConnect implements **real cryptographic session authentication** with zero mock logins:
-- **Provider & Hashing:** Server-side PBKDF2 with unique cryptographic salts (10,000 rounds of SHA-512) and optional Supabase Auth bridge.
-- **Session Tokens:** 256-bit cryptographically secure tokens stored in `HttpOnly`, `SameSite=lax` cookies (`campusconnect_session_token`).
-- **Role-Based Authorization:** Server-side role resolution (`student`, `staff`, `admin`) preventing client-side privilege escalation. Public registration strictly defaults to `student`.
-- **Routes Implemented:**
-  - `/login`: Split-editorial authentication page with password visibility toggles and real server validation.
-  - `/signup`: Multi-field registration with confirmation validation and server-side user provisioning.
-  - `/forgot-password`: Real recovery workflow.
-  - `/api/auth/login`, `/api/auth/signup`, `/api/auth/logout`, `/api/auth/me`.
+CampusConnect integrates **Clerk Authentication** (`app_3L7XtzGjCoAeeiA8Wx7bFbkJ4TF`) tailored to our warm ivory paper aesthetic, with built-in fallback for local/demo evaluation:
+
+- **Sign-In & Sign-Up Routes:**
+  - `/sign-in/[[...sign-in]]`: Warm ivory split composition embedding Clerk's `<SignIn />` component with custom `#35483A` buttons, `#FCFAF6` paper background, and `#24251F` ink typography.
+  - `/sign-up/[[...sign-up]]`: Registration portal defaulting newly created accounts to `student` role.
+  - `/auth/redirect`: Dynamic role dispatcher redirecting `student` to `/student/dashboard` and `staff`/`admin` to `/staff/dashboard`.
+- **Middleware Role Protection:** `middleware.ts` guards `/student/*`, `/staff/*`, and `/admin/*` routes using `clerkMiddleware()`.
+- **Webhook Synchronization:** `/api/webhooks/clerk` validates Svix signatures to synchronize user metadata with the application database.
+- **Cryptographic Demo Mode:** For offline/local hackathon evaluation without active Clerk keys, the app automatically enables local demo authentication with 1-click role switching between Student, Staff, and Admin.
 
 ### Default Seeded Accounts for Testing:
 | Role | Email | Password |
@@ -285,27 +318,40 @@ CampusConnect implements **real cryptographic session authentication** with zero
 
 ## 9. Verification & Automated Tests
 
-Run the test suite:
+Run the domain test suite:
 ```bash
 npm test
 ```
 ```
-✔ Category validation accepts valid categories and rejects invalid (0.78ms)
-✔ Priority validation behaves correctly (0.08ms)
+✔ Category validation accepts valid categories and rejects invalid (0.86ms)
+✔ Priority validation behaves correctly (0.09ms)
 ✔ Ticket status transition state machine (0.09ms)
-✔ Department routing mappings are exact and non-empty (0.05ms)
-✔ SLA Matrix deadline calculation (0.77ms)
-✔ AIComplaintAnalysisSchema parses structured output correctly (2.51ms)
+✔ Department routing mappings are exact and non-empty (0.08ms)
+✔ SLA Matrix deadline calculation (0.67ms)
+✔ AIComplaintAnalysisSchema parses structured output correctly (2.52ms)
 ✔ Duplicate matching score algorithm calculates accurately (0.09ms)
-✔ AIResolutionReviewSchema parses Proof-of-Fix structured verdict (0.47ms)
-ℹ tests 8, suites 0, pass 8, fail 0
+✔ AIResolutionReviewSchema parses Proof-of-Fix structured verdict (0.48ms)
+✔ Outage Detective: Lowest Common Ancestor (LCA) finds shared infrastructure upstream node (0.16ms)
+✔ Outage Detective: Confidence score calculation increases with cluster dispersion and volume (0.14ms)
+✔ Outage Detective: Probable Incident status transitions conform to lifecycle (0.07ms)
+✔ Show-Me Reporting: Deterministic hazard escalation flags dangerous keywords (0.11ms)
+✔ Show-Me Reporting: Video recording duration limit enforces 15 seconds cap (0.08ms)
+✔ Repair Copilot: Median resolution time calculation handles even, odd, and empty arrays (0.08ms)
+✔ Repair Copilot: Most common parts counts frequencies accurately and sorts descending (0.09ms)
+✔ Clerk Auth: Role-based destination routing redirects correctly (0.05ms)
+✔ Student Assistant: Emergency detection interrupts immediately and returns emergency contacts (0.06ms)
+✔ Student Assistant: Knowledge base search performs audience filtering and token scoring (0.15ms)
+✔ Student Assistant: Access control strictly refuses access to another student ticket (0.06ms)
+✔ Student Assistant: Freshness validator flags source documents older than 180 days as stale (0.04ms)
+✔ Student Assistant: 30-Question Evaluation Dataset runs with complete accuracy and zero hallucinations (0.28ms)
+ℹ tests 21, suites 0, pass 21, fail 0
 ```
 
-Verify production build:
+Verify Next.js production build:
 ```bash
-npm run build
+npm run build --prefix frontend
 ```
-All 30 Next.js routes compile statically and dynamically with Turbopack with 0 errors.
+All 37 Next.js routes compile statically and dynamically with Turbopack with 0 errors.
 
 ---
 

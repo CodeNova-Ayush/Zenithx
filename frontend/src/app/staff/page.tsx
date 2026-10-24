@@ -18,18 +18,29 @@ import {
   Filter,
   Calendar,
   Layers,
-  ArrowUpRight
+  ArrowUpRight,
+  Network,
+  Wrench
 } from 'lucide-react';
+import { getIncidents } from '@/lib/services/outage-detective';
+import { getKnowledgeBaseCount, getLatestKnowledgeDate } from '@/lib/data/knowledge-base';
 
 export default function StaffOverviewPage() {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [duplicates, setDuplicates] = useState<DuplicateCandidate[]>([]);
   const [filterCategory, setFilterCategory] = useState<string>('all');
   const [dateRange, setDateRange] = useState<string>('today');
+  const [incidentsCount, setIncidentsCount] = useState(0);
+  const [kbCount, setKbCount] = useState(0);
+  const [kbLatestDate, setKbLatestDate] = useState('');
 
   const loadData = () => {
     setTickets(getTickets());
     setDuplicates(getDuplicates());
+    const incs = getIncidents();
+    setIncidentsCount(incs.filter(i => i.status === 'proposed').length);
+    setKbCount(getKnowledgeBaseCount());
+    setKbLatestDate(getLatestKnowledgeDate());
   };
 
   useEffect(() => {
@@ -169,6 +180,63 @@ export default function StaffOverviewPage() {
             {resolvedCount}
           </div>
           <span className="text-[11px] font-mono text-emerald-800 font-medium">Proof-of-Fix verified</span>
+        </div>
+      </div>
+
+      {/* 2.5 FLAGSHIP INTELLIGENCE STRIP: OUTAGE DETECTIVE & REPAIR COPILOT */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Outage Detective Card */}
+        <div className="p-4 rounded-xl border border-border-subtle bg-paper flex items-center justify-between shadow-xs">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-amber-100 text-amber-800 border border-amber-300 flex items-center justify-center">
+              <Network className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-serif font-bold text-sm text-ink">Outage Detective</span>
+                {incidentsCount > 0 && (
+                  <span className="text-[10px] font-mono font-bold px-1.5 py-0.2 rounded bg-amber-500 text-white animate-pulse">
+                    {incidentsCount} PROPOSED
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-muted-ink">
+                Root-cause graph clustering converging on shared campus infrastructure.
+              </p>
+            </div>
+          </div>
+          <Link
+            href="/staff/incidents"
+            className="px-3 py-1.5 rounded-lg border border-border-strong bg-paper hover:bg-ivory text-xs font-mono font-bold text-ink shrink-0"
+          >
+            Inspect →
+          </Link>
+        </div>
+
+        {/* Repair Copilot Knowledge Base Card */}
+        <div className="p-4 rounded-xl border border-border-subtle bg-paper flex items-center justify-between shadow-xs">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-pale-sage text-forest border border-border-subtle flex items-center justify-center">
+              <Wrench className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-serif font-bold text-sm text-ink">Repair Copilot Knowledge Base</span>
+                <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 font-bold border border-emerald-300">
+                  {kbCount} FIXES
+                </span>
+              </div>
+              <p className="text-xs text-muted-ink">
+                Latest precedent: {kbLatestDate} • Real-time technician pre-dispatch guidance.
+              </p>
+            </div>
+          </div>
+          <Link
+            href="/staff/tickets"
+            className="px-3 py-1.5 rounded-lg border border-border-strong bg-paper hover:bg-ivory text-xs font-mono font-bold text-ink shrink-0"
+          >
+            View Precedents →
+          </Link>
         </div>
       </div>
 
